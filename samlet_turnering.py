@@ -367,6 +367,11 @@ def nk(x, d=2):
     return n2(x, d).replace(".", ",")
 
 
+def nkf(x, d=1):
+    """Norsk desimaltegn med fortegn - slik matchpoeng vises i Ruter."""
+    return (("%+." + str(d) + "f") % x).replace(".", ",")
+
+
 def fordel(par, scoret, med_frirunde=True):
     """Legger prosent per spill inn pa parene. Returnerer rangert liste.
 
@@ -392,6 +397,27 @@ def fordel(par, scoret, med_frirunde=True):
     return sorted([p for p in par.values() if p.spilt], key=lambda p: -p.prosent)
 
 
+def maks_pr_spill(scoret):
+    """Maks matchpoeng pa hvert spill: 2 poeng for hvert av de andre resultatene."""
+    antall = defaultdict(int)
+    for r, _ in scoret:
+        antall[r.spill] += 1
+    return {nr: 2.0 * (n - 1) for nr, n in antall.items()}
+
+
+def mp(pst, maks):
+    """Matchpoeng pa Ruter-skalaen: +1 for hvert par du slar, -1 for hvert du taper
+    mot, 0 for likt. Toppen pa et spill er antall bord - 1, middels er 0."""
+    return (pst / 100.0 * maks) - maks / 2.0
+
+
+def poengsum(p, maks):
+    """Parets matchpoeng og toppen (maks mulige) pa samme skala for alle."""
+    fikk = sum(mp(pst, maks.get(nr, 0.0)) for nr, pst in p.spill.items())
+    topp = sum(maks.get(nr, 0.0) / 2.0 for nr in p.spill)
+    return fikk, topp
+
+
 def plasser(rangert):
     ut, forrige, plass = {}, None, 0
     for i, p in enumerate(rangert, 1):
@@ -404,6 +430,7 @@ def plasser(rangert):
 
 def lag_rapport(navn, alle_par, scoret, merknader, kilder, klubbtall, vridd):
     rangert = fordel(alle_par, scoret)
+    maks = maks_pr_spill(scoret)
     plassering = plasser(rangert)
     spillsett = sorted({r.spill for r, _ in scoret})
 
@@ -424,15 +451,18 @@ def lag_rapport(navn, alle_par, scoret, merknader, kilder, klubbtall, vridd):
     L.append("")
 
     L.append("=" * 112)
-    L.append("%-5s %-7s %-42s %8s %6s %4s  %-14s %8s"
-             % ("Pl.", "Par", "Navn", "Samlet %", "Spilt", "Fri", "Egen klubb", "Publ. %"))
-    L.append("%-5s %-7s %-42s %8s %6s %4s  %-14s %8s"
-             % ("", "", "", "", "", "", "u/hcp", "i egen fil"))
+    L.append("%-5s %-7s %-42s %9s %8s %6s %4s  %-14s %8s"
+             % ("Pl.", "Par", "Navn", "Poeng", "Samlet %", "Spilt", "Fri",
+                "Egen klubb", "Publ. %"))
+    L.append("%-5s %-7s %-42s %9s %8s %6s %4s  %-14s %8s"
+             % ("", "", "", "topp %s" % nkf(sum(maks.values()) / 2.0, 0) if maks else "",
+                "", "", "", "u/hcp", "i egen fil"))
     L.append("=" * 112)
     for i, p in enumerate(rangert, 1):
         egen = "%d. / %s" % (p.klubb_plass, nk(p.klubb_pst)) if p.klubb_plass else ""
-        L.append("%-5d %-7s %-42s %8s %6d %4d  %-14s %8s"
-                 % (plassering[p.id], p.id, p.navn[:42], nk(p.prosent),
+        fikk, _mulig = poengsum(p, maks)
+        L.append("%-5d %-7s %-42s %9s %8s %6d %4d  %-14s %8s"
+                 % (plassering[p.id], p.id, p.navn[:42], nkf(fikk), nk(p.prosent),
                     p.spilt, p.antall_spill - p.spilt, egen,
                     nk(p.egen_pst) if p.egen_pst else ""))
         if i % 5 == 0:
@@ -460,8 +490,11 @@ def lag_rapport(navn, alle_par, scoret, merknader, kilder, klubbtall, vridd):
     L.append("Slik er det regnet")
     L.append("-" * 60)
     L.append("* For hvert spill sammenlignes alle resultatene fra alle klubbene mot")
-    L.append("  hverandre: 2 poeng for hvert par du slar, 1 for hvert du deler med.")
-    L.append("  Prosent for spillet = oppnadde poeng / maks mulige poeng.")
+    L.append("  hverandre: +1 poeng for hvert par du slar, -1 for hvert du taper mot,")
+    L.append("  0 for likt resultat - samme skala som Ruter viser. Toppen pa et spill")
+    L.append("  er antall bord minus 1, og middels er 0.")
+    L.append("* Poeng-kolonnen er summen av matchpoengene. Prosenten kan regnes etter")
+    L.append("  for hand: 50 + poeng / topp * 50.")
     L.append("* Alle spill er spilt i begge klubbene og sammenlignet pa tvers.")
     L.append("* Kolonnen 'Spilt' er spill paret satt og spilte, 'Fri' er frirunde mot")
     L.append("  blindparet. Frirunde gir paret sin egen innspilte prosent pa det")
@@ -482,6 +515,7 @@ def lag_rapport(navn, alle_par, scoret, merknader, kilder, klubbtall, vridd):
 
 
 def lag_spillfordeling(navn, scoret, alle_par):
+    maks = maks_pr_spill(scoret)
     pr_spill = defaultdict(list)
     for r, pst in scoret:
         pr_spill[r.spill].append((r, pst))
@@ -490,28 +524,35 @@ def lag_spillfordeling(navn, scoret, alle_par):
          "Alle resultater spill for spill, sortert etter poeng for N-S.", ""]
     for spillnr in sorted(pr_spill):
         rader = sorted(pr_spill[spillnr], key=lambda x: -x[0].poeng)
-        L.append("Spill %-3d  (%d resultater)" % (spillnr, len(rader)))
-        L.append("   %-8s %-8s %-9s %-6s %8s %7s %7s %s"
-                 % ("N-S", "Ø-V", "Kontrakt", "Utsp.", "Poeng", "% N-S", "% Ø-V", "Gr."))
+        m = maks[spillnr]
+        L.append("Spill %-3d  (%d resultater, topp %s matchpoeng)"
+                 % (spillnr, len(rader), nkf(m / 2.0, 0)))
+        L.append("   %-8s %-8s %-9s %-6s %8s %7s %7s %7s %7s %s"
+                 % ("N-S", "Ø-V", "Kontrakt", "Utsp.", "Score", "MP N-S", "MP Ø-V",
+                    "% N-S", "% Ø-V", "Gr."))
         for r, pst in rader:
-            L.append("   %-8s %-8s %-9s %-6s %8d %7s %7s %s"
+            L.append("   %-8s %-8s %-9s %-6s %8d %7s %7s %7s %7s %s"
                      % (r.ns.id, r.ov.id, r.kontrakt_tekst, r.utspill or "-",
-                        r.poeng, nk(pst, 1), nk(100.0 - pst, 1), r.gruppe or ""))
+                        r.poeng, nkf(mp(pst, m)), nkf(mp(100.0 - pst, m)),
+                        nk(pst, 1), nk(100.0 - pst, 1), r.gruppe or ""))
         for pp in sorted(alle_par.values(), key=lambda x: x.id):
             if spillnr in pp.frirunde and spillnr in pp.spill:
-                L.append("   %-8s %-8s %-9s %-6s %8s %7s %7s"
+                L.append("   %-8s %-8s %-9s %-6s %8s %7s %7s %7s %7s"
                          % (pp.id, "-", "Frirunde", "-", "-",
+                            nkf(mp(pp.spill[spillnr], m)), "-",
                             nk(pp.spill[spillnr], 1), "-"))
         L.append("")
     return "\n".join(L)
 
 
-def lag_csv(rangert, plassering):
-    L = ["Plass;ParID;Klubbkode;Parnr;Navn;Klubb;SamletProsent;AntallSpilt;"
+def lag_csv(rangert, plassering, maks=None):
+    L = ["Plass;ParID;Klubbkode;Parnr;Navn;Klubb;Matchpoeng;MaksPoeng;SamletProsent;AntallSpilt;"
          "AntallFrirunde;EgenKlubbPlass;EgenKlubbProsentUtenHcp;PublisertProsent"]
     for p in rangert:
-        L.append("%d;%s;%s;%s;%s;%s;%s;%d;%d;%s;%s;%s"
+        fikk, mulig = poengsum(p, maks or {})
+        L.append("%d;%s;%s;%s;%s;%s;%s;%s;%s;%d;%d;%s;%s;%s"
                  % (plassering[p.id], p.id, p.kode, p.nr, p.navn, p.klubb,
+                    nkf(fikk), nkf(mulig, 0),
                     nk(p.prosent), p.spilt, p.antall_spill - p.spilt,
                     p.klubb_plass or "",
                     nk(p.klubb_pst) if p.klubb_pst is not None else "",
@@ -589,18 +630,28 @@ def kjor(kilder_inn, navn=None, vridd="klubbvis"):
     rapport, rangert = lag_rapport(navn, alle_par, scoret, merknader, kilder,
                                    klubbtall, vridd)
     plassering = plasser(rangert)
+    maks = maks_pr_spill(scoret)
     rader = [{"Plass": plassering[p.id], "Par": p.id, "Navn": p.navn,
-              "Klubb": p.klubb.split(" - ")[-1], "Samlet %": round(p.prosent, 2),
+              "Klubb": p.klubb.split(" - ")[-1],
+              "Poeng": round(poengsum(p, maks)[0], 1),
+              "Topp": round(poengsum(p, maks)[1]),
+              "Samlet %": round(p.prosent, 2),
               "Spilt": p.spilt, "Fri": p.antall_spill - p.spilt,
               "Egen klubb u/hcp": round(p.klubb_pst, 2) if p.klubb_pst else None,
               "Publisert %": p.egen_pst} for p in rangert]
 
     spilldata = {}
+    maks_spill = maks_pr_spill(scoret)
     for r, pst in scoret:
         d = spilldata.setdefault(r.spill, {"nr": r.spill,
                                            "diagram": diagrammer.get(r.spill, []),
                                            "resultater": [], "frirunder": []})
+        m = maks_spill.get(r.spill, 0.0)
+        d["maks"] = m
+        d["topp"] = m / 2.0
         d["resultater"].append({"ns": r.ns.id, "ov": r.ov.id,
+                                "mp_ns": mp(pst, m),
+                                "mp_ov": mp(100.0 - pst, m),
                                 "kontrakt": r.kontrakt_tekst, "utspill": r.utspill,
                                 "poeng": r.poeng, "pst_ns": pst, "pst_ov": 100.0 - pst,
                                 "gruppe": r.gruppe or ""})
@@ -608,11 +659,13 @@ def kjor(kilder_inn, navn=None, vridd="klubbvis"):
         d["resultater"].sort(key=lambda x: -x["poeng"])
         for p in sorted(alle_par.values(), key=lambda x: x.id):
             if d["nr"] in p.frirunde and d["nr"] in p.spill:
-                d["frirunder"].append({"par": p.id, "pst": p.spill[d["nr"]]})
+                d["frirunder"].append({"par": p.id, "pst": p.spill[d["nr"]],
+                                       "mp": mp(p.spill[d["nr"]], d.get("maks", 0.0))})
 
     return {"navn": navn, "rapport": rapport, "spill": spilldata,
             "spillfordeling": lag_spillfordeling(navn, scoret, alle_par),
-            "csv": lag_csv(rangert, plassering), "rader": rader,
+            "csv": lag_csv(rangert, plassering, maks), "rader": rader,
+            "maks": maks,
             "merknader": merknader, "kilder": kilder, "klubbtall": klubbtall,
             "antall_spill": len({r.spill for r, _ in scoret})}
 
