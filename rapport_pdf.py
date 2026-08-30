@@ -27,6 +27,11 @@ def nk(x, d=2):
     return (("%." + str(d) + "f") % x).replace(".", ",")
 
 
+def nkf(x, d=1):
+    """Matchpoeng med fortegn, slik Ruter viser dem."""
+    return (("%+." + str(d) + "f") % x).replace(".", ",")
+
+
 def _stiler():
     s = getSampleStyleSheet()
     return {
@@ -62,18 +67,19 @@ def _topptekst(navn):
 
 
 def _stilling(res, st):
-    rader = [["Pl.", "Par", "Navn", "Klubb", "Samlet %", "Spilt", "Fri",
-              "Egen klubb\nu/hcp", "Publisert %"]]
+    topp = res["rader"][0]["Topp"] if res["rader"] else 0
+    rader = [["Pl.", "Par", "Navn", "Klubb", "Poeng\nav %+d" % topp, "Samlet %",
+              "Spilt", "Fri", "Egen klubb\nu/hcp", "Publisert %"]]
     for r in res["rader"]:
         rader.append([
             str(r["Plass"]), r["Par"], r["Navn"], r["Klubb"],
-            nk(r["Samlet %"]), str(r["Spilt"]), str(r["Fri"]),
+            nkf(r["Poeng"]), nk(r["Samlet %"]), str(r["Spilt"]), str(r["Fri"]),
             nk(r["Egen klubb u/hcp"]) if r["Egen klubb u/hcp"] is not None else "",
             nk(r["Publisert %"]) if r["Publisert %"] else "",
         ])
     t = Table(rader, repeatRows=1,
-              colWidths=[10 * mm, 15 * mm, 58 * mm, 27 * mm, 17 * mm, 11 * mm,
-                         9 * mm, 18 * mm, 18 * mm])
+              colWidths=[8 * mm, 13 * mm, 53 * mm, 22 * mm, 16 * mm, 15 * mm,
+                         9 * mm, 7 * mm, 17 * mm, 15 * mm])
     stil = [
         ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 7),
         ("FONT", (0, 1), (-1, -1), "Helvetica", 7.6),
@@ -119,24 +125,28 @@ def _spillblokk(d, st):
         for l in d["diagram"])
     venstre = Paragraph(diagram, st["kort"])
 
-    rader = [["N-S", "Ø-V", "Kontrakt", "Utsp.", "Poeng", "% N-S", "% Ø-V"]]
+    rader = [["N-S", "Ø-V", "Kontrakt", "Utsp.", "Score",
+              "MP N-S", "% N-S", "MP Ø-V", "% Ø-V"]]
     for r in d["resultater"]:
         rader.append([r["ns"], r["ov"],
                       r["kontrakt"] + (" (%s)" % r["gruppe"] if r["gruppe"] else ""),
                       r["utspill"] or "-", str(r["poeng"]),
-                      nk(r["pst_ns"], 1), nk(r["pst_ov"], 1)])
+                      nkf(r["mp_ns"]), nk(r["pst_ns"], 1),
+                      nkf(r["mp_ov"]), nk(r["pst_ov"], 1)])
     for f in d["frirunder"]:
-        rader.append([f["par"], "-", "Frirunde", "-", "-", nk(f["pst"], 1), "-"])
+        rader.append([f["par"], "-", "Frirunde", "-", "-",
+                      nkf(f["mp"]), nk(f["pst"], 1), "-", "-"])
 
     hoyre = Table(rader, repeatRows=1,
-                  colWidths=[15 * mm, 15 * mm, 22 * mm, 12 * mm, 15 * mm,
-                             13 * mm, 13 * mm])
+                  colWidths=[13 * mm, 13 * mm, 20 * mm, 10 * mm, 13 * mm,
+                             11 * mm, 11 * mm, 11 * mm, 11 * mm])
     stil = [
         ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 6.5),
         ("FONT", (0, 1), (-1, -1), "Helvetica", 7.0),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("BACKGROUND", (0, 0), (-1, 0), MORK),
         ("ALIGN", (4, 0), (-1, -1), "RIGHT"),
+        ("LINEBEFORE", (5, 0), (5, -1), 0.4, STREK),
         ("TOPPADDING", (0, 0), (-1, -1), 1.1),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 1.1),
         ("LINEBELOW", (0, 0), (-1, -1), 0.25, STREK),
@@ -149,11 +159,13 @@ def _spillblokk(d, st):
             stil.append(("TEXTCOLOR", (0, i), (-1, i), GRA))
     hoyre.setStyle(TableStyle(stil))
 
-    ytre = Table([[venstre, hoyre]], colWidths=[73 * mm, 107 * mm])
+    ytre = Table([[venstre, hoyre]], colWidths=[67 * mm, 113 * mm])
     ytre.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
                               ("LEFTPADDING", (0, 0), (0, 0), 0),
                               ("RIGHTPADDING", (1, 0), (1, 0), 0)]))
-    return KeepTogether([Paragraph("Spill %d" % d["nr"], st["spill"]), ytre,
+    tittel = "Spill %d<font size=7 color='#5b6b7b'>   topp %s matchpoeng</font>" % (
+        d["nr"], nkf(d.get("topp", 0), 0))
+    return KeepTogether([Paragraph(tittel, st["spill"]), ytre,
                          Spacer(1, 3 * mm)])
 
 
@@ -186,10 +198,12 @@ def lag_pdf(res, sti=None):
          Paragraph("Slik er det regnet", st["h2"]),
          Paragraph(
              "For hvert spill sammenlignes alle resultatene fra alle klubbene mot "
-             "hverandre: 2 poeng for hvert par du slår, 1 for hvert du deler med. "
-             "Prosent for spillet er oppnådde poeng delt på maks mulige. Totalen er "
+             "hverandre: +1 poeng for hvert par du slår, -1 for hvert du taper mot og "
+             "0 for likt - samme skala som Ruter viser. Toppen på et spill er antall "
+             "bord minus 1, middels er 0. Totalen er "
              "gjennomsnittet av spillene, og frirunde gir paret sin egen innspilte "
-             "prosent. Handikap er ikke brukt; kolonnen «Publisert %» er tallet fra "
+             "prosent. Poeng-kolonnen er summen av matchpoengene, så prosenten kan "
+             "regnes etter for hånd: 50 + poeng delt på topp, ganget med 50. Handikap er ikke brukt; kolonnen «Publisert %» er tallet fra "
              "klubbens egen resultatfil og er ikke sammenlignbart på tvers der "
              "handikap benyttes.", st["brod"])]
 
@@ -210,3 +224,4 @@ def lag_pdf(res, sti=None):
         with open(sti, "wb") as f:
             f.write(data)
     return data
+  
