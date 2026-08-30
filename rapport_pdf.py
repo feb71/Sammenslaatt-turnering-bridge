@@ -224,4 +224,3 @@ def lag_pdf(res, sti=None):
         with open(sti, "wb") as f:
             f.write(data)
     return data
-  
