@@ -99,6 +99,11 @@ m3.metric("Klubber", len(res["kilder"]))
 
 st.subheader("Sluttstilling")
 tabell = pd.DataFrame(res["rader"])
+st.caption(
+    "Poeng er matchpoeng pa samme skala som Ruter viser: +1 for hvert par du slar, "
+    "-1 for hvert du taper mot, 0 for likt. Toppen pa et spill er antall bord minus "
+    "1. Prosenten er 50 + poeng / topp * 50, sa regnestykket kan kontrolleres."
+)
 st.dataframe(tabell, use_container_width=True, hide_index=True)
 
 st.subheader("Klubbvis")
@@ -116,7 +121,6 @@ st.dataframe(
             for k in res["klubbtall"]
         ]
     ),
-    use_container_width=True,
     hide_index=True,
 )
 st.caption(
@@ -130,18 +134,40 @@ if andre:
         for m in andre:
             st.write("* " + m)
 
+st.subheader("Utskrift")
+try:
+    import rapport_pdf
+    pdf_data = rapport_pdf.lag_pdf(res)
+except ImportError:
+    pdf_data = None
+    st.warning(
+        "PDF-en krever pakken **reportlab**, som ikke er installert her.\n\n"
+        "* Lokalt: kjor `pip install -r requirements.txt` og start appen pa nytt.\n"
+        "* Streamlit Cloud: se etter linja `reportlab>=4.0` i `requirements.txt` "
+        "i GitHub-repoet, og velg deretter *Manage app -> Reboot app*.\n\n"
+        "Tekstfilene og CSV-en under virker som normalt."
+    )
+except Exception as feil:  # noqa: BLE001
+    pdf_data = None
+    st.warning("Klarte ikke a lage PDF: %s" % feil)
+
+if pdf_data:
+    st.caption(
+        "Sluttstilling pa side 1, deretter spillene med kortfordeling og alle "
+        "resultater. Bla gjennom her, eller last ned og skriv ut."
+    )
+    if hasattr(st, "pdf"):
+        st.pdf(pdf_data, height=800)
+    else:
+        st.info("Oppdater Streamlit for a se PDF-en i nettleseren - "
+                "last den ned nedenfor sa lenge.")
+
 with st.expander("Resultatfil som tekst"):
     st.code(res["rapport"], language=None)
 with st.expander("Spillfordeling"):
     st.code(res["spillfordeling"], language=None)
 
 st.subheader("Last ned")
-try:
-    import rapport_pdf
-    pdf_data = rapport_pdf.lag_pdf(res)
-except Exception as feil:  # noqa: BLE001
-    pdf_data = None
-    st.warning("Klarte ikke a lage PDF: %s" % feil)
 
 filer = {
     "Samlet_resultat.txt": res["rapport"],
