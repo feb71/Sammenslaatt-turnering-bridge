@@ -156,11 +156,15 @@ if pdf_data:
         "Sluttstilling pa side 1, deretter spillene med kortfordeling og alle "
         "resultater. Bla gjennom her, eller last ned og skriv ut."
     )
-    if hasattr(st, "pdf"):
+    try:
         st.pdf(pdf_data, height=800)
-    else:
-        st.info("Oppdater Streamlit for a se PDF-en i nettleseren - "
-                "last den ned nedenfor sa lenge.")
+    except Exception:  # noqa: BLE001 - visningen er en bonus, ikke et krav
+        st.info(
+            "PDF-visning i nettleseren krever tillegget **streamlit-pdf**. "
+            "Legg linja `streamlit[pdf]>=1.50` i `requirements.txt` og velg "
+            "*Manage app -> Reboot app*, eller kjor `pip install \"streamlit[pdf]\"` "
+            "lokalt. Selve PDF-en er ferdig og kan lastes ned nedenfor."
+        )
 
 with st.expander("Resultatfil som tekst"):
     st.code(res["rapport"], language=None)
