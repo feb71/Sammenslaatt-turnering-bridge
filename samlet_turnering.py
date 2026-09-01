@@ -35,6 +35,8 @@ Programmet lager:
     Samlet_resultat.csv        - samme sluttstilling som CSV (semikolon)
 """
 
+VERSJON = "2026-09-01"   # vises i appen, sa du ser hvilken kode som kjorer
+
 import argparse
 import os
 import re
