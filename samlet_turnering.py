@@ -145,6 +145,7 @@ def les_tekst(tekst, kode=None, filnavn="(ukjent)"):
     resultater = []
     kortfordeling = {}
     diagrammer = {}
+    uleste = []
 
     # --- 1) Startlisten / sluttstillingen i egen klubb ------------------------
     hdr_i = None
@@ -163,13 +164,19 @@ def les_tekst(tekst, kode=None, filnavn="(ukjent)"):
     kol_slutt_navn = etter[0] if etter else kol_klubb
 
     klubber = defaultdict(int)
+    siste_plass = None
     for l in linjer[hdr_i + 1:]:
         if l.startswith("-----"):
             break
-        m = re.match(r"^\s*(\d+)\s+(\d+)\s+(-?\d+,\d+)\s+\*?\s*(-?\d+,\d+)\s", l)
+        # Plass star tomt ved delt plassering, og Poeng kan vaere heltall.
+        # Stjerne (*) markerer par som har hatt frirunde.
+        m = re.match(r"^\s{0,8}(?:(\d+)\s+)?(\d+)\s+(-?\d+(?:,\d+)?)\s+\*?\s*"
+                     r"(-?\d+,\d+)\s", l)
         if not m:
             continue
-        plass, parnr = int(m.group(1)), m.group(2)
+        plass = int(m.group(1)) if m.group(1) else siste_plass
+        siste_plass = plass
+        parnr = m.group(2)
         pst = float(m.group(4).replace(",", "."))
         navn = re.sub(r"\s+[\d.,\- ]+$", "", l[kol_navn:kol_slutt_navn]).strip()
         klubb = l[kol_klubb:].strip()
@@ -231,9 +238,11 @@ def les_tekst(tekst, kode=None, filnavn="(ukjent)"):
                 r = _les_resultatlinje(bit, spillnr, par, kode)
                 if r:
                     resultater.append(r)
+                elif re.match(r"^\s*\d+\s+\d+\s+\S", bit):
+                    uleste.append("spill %d: %s" % (spillnr, bit.strip()))
         spillteller = hoyre
 
-    return klubbnavn, tittel, par, resultater, kortfordeling, diagrammer
+    return klubbnavn, tittel, par, resultater, kortfordeling, diagrammer, uleste
 
 
 def _kort(diagram, fra, til):
@@ -249,6 +258,8 @@ def _kort(diagram, fra, til):
                 ut.append(tok)
     return "|".join(ut)
 
+
+PASSET = re.compile(r"^[Pp]ass(?:et\s*ut)?\s+(?P<hale>.*)$")
 
 FRIRUNDE = re.compile(r"^\s*(\d+|--)\s+(\d+|--)\s+Frirunde\b", re.IGNORECASE)
 
@@ -277,10 +288,11 @@ def _les_resultatlinje(bit, spillnr, par, kode):
         return None
 
     sm = SPILT.match(rest)
-    if not sm:
+    pm = PASSET.match(rest) if not sm else None
+    if not sm and not pm:
         return None
 
-    hale = sm.group("hale").split()
+    hale = (sm.group("hale") if sm else pm.group("hale")).split()
     # to siste er matchpoint fra opprinnelig turnering - dropp dem
     if len(hale) >= 2 and all("," in t or TALL.match(t) for t in hale[-2:]):
         hale = hale[:-2]
@@ -298,8 +310,11 @@ def _les_resultatlinje(bit, spillnr, par, kode):
     else:
         return None
 
-    return Resultat(spillnr, par[ns], par[ov], sm.group("kontrakt").replace(" ", ""),
-                    sm.group("sf").upper(), sm.group("utgang"), utspill,
+    if sm:
+        return Resultat(spillnr, par[ns], par[ov], sm.group("kontrakt").replace(" ", ""),
+                        sm.group("sf").upper(), sm.group("utgang"), utspill,
+                        poeng, gruppe, kode)
+    return Resultat(spillnr, par[ns], par[ov], "Pass", "", "", "",
                     poeng, gruppe, kode)
 
 
@@ -577,7 +592,12 @@ def kjor(kilder_inn, navn=None, vridd="klubbvis"):
         filnavn = k_inn.get("filnavn", "(ukjent)")
         kode = k_inn.get("kode") or kode_fra_filnavn(filnavn, brukt)
         brukt.add(kode)
-        klubb, tittel, par, res, kort, diag = les_tekst(k_inn["tekst"], kode, filnavn)
+        klubb, tittel, par, res, kort, diag, uleste = les_tekst(
+            k_inn["tekst"], kode, filnavn)
+        if uleste:
+            kort_advarsler.append(
+                "%s: %d resultatlinje(r) kunne ikke leses og er utelatt - f.eks. %s"
+                % (kode, len(uleste), uleste[0]))
         for nr, linjer in diag.items():
             diagrammer.setdefault(nr, linjer)
         for p in par.values():
