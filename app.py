@@ -21,7 +21,8 @@ st.set_page_config(page_title="Samlet turnering", page_icon="♠", layout="wide"
 st.title("♠ Samlet turnering")
 st.caption(
     "Slar sammen resultatfiler fra flere klubber som har spilt de samme spillene. "
-    "Alt scores pa nytt fra poengene ved bordet, uten handikap."
+    "Alt scores pa nytt fra poengene ved bordet, uten handikap.  \n"
+    "Beregningsversjon: **%s**" % getattr(st_kjerne, "VERSJON", "ukjent (gammel fil)")
 )
 
 with st.sidebar:
