@@ -35,7 +35,7 @@ Programmet lager:
     Samlet_resultat.csv        - samme sluttstilling som CSV (semikolon)
 """
 
-VERSJON = "2026-09-01"   # vises i appen, sa du ser hvilken kode som kjorer
+VERSJON = "2026-09-15"   # vises i appen, sa du ser hvilken kode som kjorer
 
 import argparse
 import os
@@ -204,7 +204,8 @@ def les_tekst(tekst, kode=None, filnavn="(ukjent)"):
 
     spillteller = 0
     for seksjon in seksjoner:
-        # finn tabelloverskriften og kolonnedelingen
+        # finn tabelloverskriften. Ruter setter 2 eller 3 spill ved siden av
+        # hverandre - hver "Par" i overskriften starter en ny kolonne.
         hdr_idx = None
         for j, l in enumerate(seksjon):
             if "Par" in l and "Kontr" in l:
@@ -213,26 +214,31 @@ def les_tekst(tekst, kode=None, filnavn="(ukjent)"):
         if hdr_idx is None:
             continue
         pos = [m.start() for m in re.finditer(r"Par\b", seksjon[hdr_idx])]
-        delekol = pos[1] - 1 if len(pos) > 1 else len(seksjon[hdr_idx])
+        if not pos:
+            continue
+        grenser = [max(p - 1, 0) for p in pos] + [None]
+        kolonner = [(grenser[i], grenser[i + 1]) for i in range(len(pos))]
 
-        # spillnumre: forste ikke-tomme linje i seksjonen
+        # spillnumre: forste ikke-tomme linje i seksjonen, ett nummer per kolonne
         forste = next((l for l in seksjon if l.strip()), "")
-        v_nr = re.match(r"^\s*(\d{1,2})\s", forste)
-        h_nr = re.match(r"^\s*(\d{1,2})\s", forste[delekol:])
-        venstre = int(v_nr.group(1)) if v_nr else spillteller + 1
-        hoyre = int(h_nr.group(1)) if h_nr else venstre + 1
+        numre = []
+        for i, (fra, til) in enumerate(kolonner):
+            bit = forste[fra:til] if til else forste[fra:]
+            m_nr = re.match(r"^\s*(\d{1,2})\s", bit)
+            numre.append(int(m_nr.group(1)) if m_nr else spillteller + 1 + i)
 
         # kortfordeling (til kontroll av at klubbene har spilt samme spill)
         diagram = seksjon[:min(hdr_idx, 12)]
-        kortfordeling[venstre] = _kort(diagram, 0, delekol)
-        kortfordeling[hoyre] = _kort(diagram, delekol, None)
-        diagrammer[venstre] = [l[:delekol].rstrip() for l in diagram]
-        diagrammer[hoyre] = [l[delekol:].rstrip() for l in diagram]
+        for (fra, til), spillnr in zip(kolonner, numre):
+            kortfordeling[spillnr] = _kort(diagram, fra, til)
+            diagrammer[spillnr] = [(l[fra:til] if til else l[fra:]).rstrip()
+                                   for l in diagram]
 
         for l in seksjon[hdr_idx + 1:]:
             if not l.strip():
                 continue
-            for spillnr, bit in ((venstre, l[:delekol]), (hoyre, l[delekol:])):
+            for (fra, til), spillnr in zip(kolonner, numre):
+                bit = l[fra:til] if til else l[fra:]
                 fri = _les_frirunde(bit, par)
                 if fri:
                     fri.frirunde.add(spillnr)
@@ -242,7 +248,7 @@ def les_tekst(tekst, kode=None, filnavn="(ukjent)"):
                     resultater.append(r)
                 elif re.match(r"^\s*\d+\s+\d+\s+\S", bit):
                     uleste.append("spill %d: %s" % (spillnr, bit.strip()))
-        spillteller = hoyre
+        spillteller = max(numre)
 
     return klubbnavn, tittel, par, resultater, kortfordeling, diagrammer, uleste
 
@@ -580,7 +586,7 @@ def lag_csv(rangert, plassering, maks=None):
 # ----------------------------------------------------------------------------
 
 
-def kjor(kilder_inn, navn=None, vridd="klubbvis"):
+def kjor(kilder_inn, navn=None, vridd="klubbvis", spill="felles"):
     """Kjorer en samlet turnering.
 
     kilder_inn: liste av dict med 'tekst', 'filnavn' og valgfri 'kode'.
@@ -617,6 +623,31 @@ def kjor(kilder_inn, navn=None, vridd="klubbvis"):
 
     if not alle_res:
         raise ValueError("Fant ingen resultater i filene.")
+
+    # spill som ikke alle klubbene har spilt. NBF: ekstra spill teller bare lokalt.
+    pr_klubb_spill = defaultdict(set)
+    for r in alle_res:
+        pr_klubb_spill[r.kode].add(r.spill)
+    felles = set.intersection(*pr_klubb_spill.values()) if pr_klubb_spill else set()
+    ekstra = sorted({r.spill for r in alle_res} - felles)
+    if ekstra and len(pr_klubb_spill) > 1:
+        hvem = ", ".join(sorted({kode for kode, sp in pr_klubb_spill.items()
+                                 if sp & set(ekstra)}))
+        if spill == "felles":
+            alle_res = [r for r in alle_res if r.spill in felles]
+            for p in alle_par.values():
+                p.frirunde = {nr for nr in p.frirunde if nr in felles}
+            kort_advarsler.append(
+                "Spill %s ble bare spilt i %s og er holdt utenfor den samlede "
+                "turneringen. De %d felles spillene er med. MERK: kolonnen "
+                "'Publ. %%' dekker klubbens alle spill og kan derfor avvike "
+                "en del - kolonnen 'Egen klubb u/hcp' er regnet over de samme "
+                "%d spillene og er den som kan sammenlignes."
+                % (_spillnr_tekst(ekstra), hvem, len(felles), len(felles)))
+        else:
+            kort_advarsler.append(
+                "Spill %s ble bare spilt i %s og er scoret bare mot egne "
+                "klubbkamerater." % (_spillnr_tekst(ekstra), hvem))
 
     scoret, merknader = score(alle_res, vridd)
     merknader = kort_advarsler + merknader
@@ -692,6 +723,21 @@ def kjor(kilder_inn, navn=None, vridd="klubbvis"):
             "antall_spill": len({r.spill for r, _ in scoret})}
 
 
+def _spillnr_tekst(numre):
+    """1,2,3,7 -> "1-3 og 7" """
+    if not numre:
+        return ""
+    grupper, start, forrige = [], numre[0], numre[0]
+    for n in numre[1:] + [None]:
+        if n != forrige + 1:
+            grupper.append(str(start) if start == forrige else "%d-%d" % (start, forrige))
+            start = n
+        forrige = n
+    if len(grupper) == 1:
+        return grupper[0]
+    return ", ".join(grupper[:-1]) + " og " + grupper[-1]
+
+
 def kode_fra_filnavn(sti, brukt):
     base = os.path.splitext(os.path.basename(sti))[0]
     bit = re.split(r"[_\-. ]+", base)[-1]
@@ -711,6 +757,9 @@ def main():
     ap.add_argument("--navn", default=None, help="tittel pa den samlede turneringen")
     ap.add_argument("--koder", default=None,
                     help="komma-separerte klubbkoder, en per fil, f.eks. HBK,KB")
+    ap.add_argument("--spill", choices=["felles", "alle"], default="felles",
+                    help="ta med bare spill alle klubbene har spilt (standard), "
+                         "eller alle spill")
     ap.add_argument("--ingen-pdf", dest="ingen_pdf", action="store_true",
                     help="ikke lag PDF-rapport")
     ap.add_argument("--vridd", choices=["klubbvis", "utelat"], default="klubbvis",
@@ -725,7 +774,7 @@ def main():
                                "filnavn": sti,
                                "kode": koder[i] if i < len(koder) else None})
 
-    res = kjor(kilder_inn, args.navn, args.vridd)
+    res = kjor(kilder_inn, args.navn, args.vridd, args.spill)
     rapport = res["rapport"]
 
     os.makedirs(args.ut, exist_ok=True)
