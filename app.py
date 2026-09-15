@@ -40,6 +40,15 @@ with st.sidebar:
         }[v],
         help="Et vridd spill kan ikke sammenlignes pa tvers av klubbene.",
     )
+    spillvalg = st.radio(
+        "Spill bare en klubb har spilt",
+        options=["felles", "alle"],
+        format_func=lambda v: {
+            "felles": "Bruk bare spill alle har spilt",
+            "alle": "Ta med alle spill",
+        }[v],
+        help="NBF regner ekstra spill bare i klubbens lokale resultat.",
+    )
     st.divider()
     st.markdown(
         "**Slik gjor du det hver klubbkveld**\n\n"
@@ -76,7 +85,7 @@ if len({k["kode"] for k in kilder_inn}) < len(kilder_inn):
     st.stop()
 
 try:
-    res = st_kjerne.kjor(kilder_inn, navn, vridd)
+    res = st_kjerne.kjor(kilder_inn, navn, vridd, spillvalg)
 except Exception as feil:  # noqa: BLE001 - vises til brukeren
     st.error("Klarte ikke a lese filene: %s" % feil)
     st.stop()
